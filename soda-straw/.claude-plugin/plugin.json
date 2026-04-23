@@ -1,0 +1,29 @@
+{
+  "name": "soda-straw",
+  "description": "Connect to the Soda Straw MCP and promote sessions into persistent agents",
+  "version": "1.0.0",
+  "homepage": "https://github.com/sodadata/soda-straw-tools",
+  "userConfig": {
+    "api_endpoint": {
+      "type": "string",
+      "title": "Soda Straw endpoint",
+      "description": "Base URL of your Soda Straw instance (no trailing slash)",
+      "default": "https://localhost"
+    },
+    "api_token": {
+      "type": "string",
+      "title": "API token",
+      "description": "Personal API token. Generate one under Settings > API tokens in the Soda Straw UI.",
+      "sensitive": true
+    }
+  },
+  "mcpServers": {
+    "soda-straw": {
+      "type": "http",
+      "url": "${user_config.api_endpoint}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${user_config.api_token}"
+      }
+    }
+  }
+}

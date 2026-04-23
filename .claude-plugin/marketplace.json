@@ -1,0 +1,22 @@
+{
+  "name": "soda-straw-tools",
+  "owner": {
+    "name": "Soda Data",
+    "email": "support@sodastraw.ai",
+    "url": "https://sodastraw.ai"
+  },
+  "metadata": {
+    "description": "Soda Straw builder tools - MCP connection + skills",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "soda-straw",
+      "source": "./soda-straw",
+      "description": "Connect to the Soda Straw MCP and promote sessions into persistent agents",
+      "version": "1.0.0",
+      "category": "agents",
+      "tags": ["soda-straw", "mcp", "agents", "build-plane"]
+    }
+  ]
+}
