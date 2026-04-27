@@ -1,54 +1,53 @@
 ---
 name: promote-session
 description: >
-  Promote the current Claude Code session into a persistent Soda Straw Agent
-  (a workspace / access definition: the set of straws + permissions a runtime
-  can use, not a runtime in itself). Scans the transcript for tool calls to
-  the Soda Straw MCP server, derives which straws were used and at what
-  access level, and creates an Agent with exactly those straw assignments in
-  one atomic call. Use when the user says "promote this session to an agent",
-  "save this as an agent", or "create a workspace from what we just did".
-  If the user wants the session to actually *run* autonomously (cron, on
-  message, background), use the `deploy-session` skill instead - it wraps
-  this one and then deploys the workspace to Anthropic Managed Agents.
+  Productionize the current Claude Code session: create a Soda Straw Agent
+  (workspace / access definition) from the straws used in this session, then
+  deploy it as an autonomous runtime on Anthropic Managed Agents wired back
+  to Soda Straw via MCP. The deployed agent gets scoped MCP access to
+  exactly the straws used - no manual key minting, no manual MCP config.
+  Use when the user says "promote this session", "save this as an agent",
+  "ship this", "deploy this", "productionize", "run this on a schedule", or
+  similar. This is the default path for taking interactive Claude Code work
+  to production. Falls back to workspace-only when no `managed_claude_agent`
+  straw is configured (and tells the user how to add one).
 compatibility: Requires connection to the Soda Straw MCP endpoint at /mcp.
-allowed-tools: agents_create agents_list straws_list straws_tools
+allowed-tools: agents_create agents_list straws_list straws_tools straws_call
 metadata:
   author: soda-straw
-  version: "1.1"
+  version: "2.0"
   domain: build-plane
 ---
 
 # Promote Session
 
-Take the Soda Straw work done in the current Claude Code session and
-register a persistent **Agent** (workspace / access definition) with
-the same straw set.
+Take the Soda Straw work done in the current Claude Code session and ship
+it: create a persistent **Agent** (workspace) and a **deployed runtime**
+on Anthropic Managed Agents, all in one go.
 
 ## Soda Straw's two-layer model
 
-It's important to keep these straight:
+Two things, easy to conflate:
 
-- **Soda Straw Agent** — a *workspace* or *access definition*. Records
-  which straws the agent can use, at what permission level, plus
-  optional skills and channels. **It does not run anything by itself.**
-  Permissions resolve live through `AgentStraw`, so changes to the
-  Agent's straw set propagate to any runtime pointed at it without
-  redeploying.
-- **Deployed agent** — the *runtime* (model + system prompt + loop +
-  schedule). In Soda Straw, the canonical deploy target is Anthropic
-  Managed Agents, reached via a `managed_claude_agent` straw. The
-  deployed agent calls back into Soda Straw over MCP, scoped to the
-  Agent (workspace) it was bound to.
+- **Soda Straw Agent** — the *workspace* / access definition. Lists the
+  straws (and per-straw permission) a runtime is allowed to use. It
+  doesn't run anything by itself. Permission resolution is live, so
+  editing the Agent's straws propagates to deployed runtimes without a
+  redeploy.
+- **Deployed agent** — the *runtime* hosted on Anthropic's managed
+  infra. Has a model, a system prompt, an event loop, and session
+  history. Talks to Soda Straw over MCP, scoped (via a minted API key)
+  to the Soda Straw Agent it was bound to.
 
-This skill creates the workspace. Use the `deploy-session` skill if you
-want to also stand up a runtime that uses it - that's the default
-productionization path.
+This skill creates both, in that order. If the user only wants the
+workspace (no `managed_claude_agent` straw configured, or they
+explicitly say "just the workspace"), it gracefully falls back to
+creating the Agent only.
 
 The user has been using their **personal API key** to talk to the Soda
 Straw MCP. Every straw they touched during this session is a candidate
 for the new Agent's assignments. Their explicit confirmation is required
-before calling `agents_create`.
+before anything is created.
 
 ## Strategy
 
@@ -73,9 +72,9 @@ Build a map:
 }
 ```
 
-Ignore transcript entries that are errors, denied calls, or
-management calls like `straws_list`, `straws_tools`, `straws_create` —
-only the actual straw tool invocations count as "used in this session".
+Ignore transcript entries that are errors, denied calls, or management
+calls like `straws_list`, `straws_tools`, `straws_create` — only actual
+straw tool invocations count as "used in this session".
 
 If the inventory is empty, tell the user "I don't see any Soda Straw
 tool calls in this session — there's nothing to promote yet." and stop.
@@ -94,46 +93,86 @@ seen:
 | any `write`   | `read_write`        |
 | any `destructive` | `full`          |
 
-If a tool name isn't in the manifest (renamed, removed, or cached
-under a prefix), treat it as `write` and flag it in the summary so the
-user knows what fell through.
+If a tool name isn't in the manifest (renamed, removed, or cached under
+a prefix), treat it as `write` and flag it in the summary so the user
+knows what fell through.
 
-### Step 3: Confirm with the user
+### Step 3: Pick a deploy target (or fall back to workspace-only)
 
-Show a compact table and a proposed Agent name/description:
+Call `straws_list` and look for straws with `type == "managed_claude_agent"`.
+
+- **None found**: graceful degrade. Tell the user:
+  ```
+  No `managed_claude_agent` straw is configured, so I can only save the
+  workspace right now. To deploy a runtime later, add one (Anthropic API
+  key + a public gateway URL — for local dev that's an ngrok tunnel):
+
+    straws_create(body={
+      "type": "managed_claude_agent",
+      "name": "anthropic-agents",
+      "anthropic_api_key": "sk-ant-...",
+      "gateway_url": "https://<your-public-url>"
+    })
+
+  Then re-run me. For now, want me to just save the workspace?
+  ```
+  If the user says yes, jump to step 5 (workspace only). Otherwise stop.
+- **One found**: that's the target.
+- **Multiple found**: ask the user which one (e.g. `anthropic-dev` vs
+  `anthropic-prod`). Cache the choice as `<deploy_straw>`.
+
+### Step 4: Synthesise the deployed-agent config
+
+For the deploy path only (skip if workspace-only):
+
+- **Name**: kebab-case, derived from the work (e.g. `invoice-sync`).
+  Reuse the workspace name unless the user wants them to differ.
+- **Model**: default `claude-opus-4-7` unless the user says otherwise.
+- **System prompt**: a one-paragraph synthesis of what the session
+  accomplished, framed as a job description for the runtime. Pull
+  directly from explicit user instructions in the session when
+  present; otherwise infer from the tool-call pattern. Examples:
+  - "You are an invoice-sync agent. Each run, fetch new invoices from
+    QuickBooks, dedupe against existing entries in Notion, and write
+    the new ones to the `Invoices` database. Surface anomalies (missing
+    line items, mismatched totals) as comments instead of failing."
+  - "You are a weekly-report agent. Pull last week's closed deals from
+    Salesforce, summarise wins/losses, and post the digest to
+    #revenue-weekly via the Slack straw."
+
+### Step 5: Confirm with the user (one consolidated pass)
+
+Show the Agent (workspace) and runtime config in a single confirmation:
 
 ```
-I'll create the Soda Straw Agent (workspace) `acme-ops` from this session:
+I'll promote this session.
 
-  Straw              Tools used            Permission
-  -------            ----------            ----------
-  notion             search, get_page      read
-  salesforce         query, update_lead    read_write
-  pagerduty          trigger_incident      full
+Soda Straw Agent (workspace, new):
+  Name:        acme-ops
+  Description: "Promoted from Claude Code session on 2026-04-27"
+  Straws:      notion (read), salesforce (read_write), pagerduty (full)
 
-  Description: "Promoted from Claude Code session on 2026-04-22"
+Anthropic Managed Agent (runtime, new):
+  Straw:       anthropic-prod
+  Name:        acme-ops
+  Model:       claude-opus-4-7
+  System:      "You are acme-ops. ..."
 
-This creates a workspace, not a running agent. Shall I proceed?
-(or suggest a different name / tweak a permission)
+Proceed? (or tweak any field)
 ```
 
-Let the user tweak the name, description, or any per-straw permission
-before confirming. If they ask to drop a straw entirely, remove it from
-the payload.
+For the workspace-only fallback, drop the runtime block. Let the user
+tweak the name, description, system prompt, model, or any per-straw
+permission before confirming. If they ask to drop a straw entirely,
+remove it.
 
-### Step 4: Create the Agent (workspace)
-
-Call `agents_create` in one shot:
+### Step 6: Create the Agent (workspace)
 
 ```
 agents_create(
-  name="<confirmed-name>",
-  description="<confirmed-description>",
-  straws=[
-    {"straw": "notion",      "permission": "read"},
-    {"straw": "salesforce",  "permission": "read_write"},
-    {"straw": "pagerduty",   "permission": "full"},
-  ],
+  name=<confirmed-name>,
+  description="Promoted from Claude Code session on <date>",
+  straws=[ ... per step 2 ... ],
   trust_level="interactive",
 )
 ```
@@ -141,44 +180,149 @@ agents_create(
 The call is atomic — if any straw fails authorisation the whole thing
 rolls back and no partial Agent is created.
 
-### Step 5: Report and offer next step
+Save the returned `id` as `<soda_straw_agent_id>`. If the user opted
+for workspace-only, jump to step 9.
 
-Surface the returned `id` and a link (if the user is on localhost:
-`http://localhost:5799/agents/<id>`). Briefly recap what straw access
-the new Agent (workspace) has. Don't mention the API key — that stays
-personal.
+### Step 7: Ensure an Anthropic environment exists
 
-Then nudge toward productionization:
+Deployed agents need an environment (container template) for sessions.
+
+1. List existing environments on the deploy straw:
+   ```
+   straws_call(straw=<deploy_straw>, tool="environment_list")
+   ```
+2. If at least one exists, reuse the first.
+3. Otherwise create a default cloud environment with unrestricted
+   networking:
+   ```
+   straws_call(
+     straw=<deploy_straw>,
+     tool="environment_create",
+     arguments={
+       "name": "default",
+       "config": {"type": "cloud", "networking": {"type": "unrestricted"}}
+     }
+   )
+   ```
+   Cache its `id` as `<environment_id>`.
+
+### Step 8: Deploy the runtime
+
+Call `agent_create` on the deploy straw, passing `soda_straw_agent`.
+The straw adapter auto-mints a scoped API key, provisions an Anthropic
+vault + `static_bearer` credential pointing at the Soda Straw gateway,
+and injects `mcp_servers` + `mcp_toolset` into the agent body. The
+user does not see or handle the key.
 
 ```
-The Agent (workspace) is saved. It doesn't run anything yet — it's
-just an access definition. To deploy it as a runtime that executes
-autonomously, run the `deploy-session` skill (it'll take this Agent
-and stand up an Anthropic Managed Agent wired back to Soda Straw).
+straws_call(
+  straw=<deploy_straw>,
+  tool="agent_create",
+  arguments={
+    "name": <confirmed-name>,
+    "model": <confirmed-model>,
+    "system": <confirmed-system-prompt>,
+    "tools": [{"type": "agent_toolset_20260401"}],
+    "soda_straw_agent": <soda_straw_agent_id>
+  }
+)
 ```
 
-## Authorisation notes
+Save the returned `id` as `<remote_agent_id>`.
 
-- The caller (you, acting as the user) must own each straw **or** already
-  have `IdentityStraw` access at a rank ≥ the permission being granted.
-  If `agents_create` returns `permission_denied`, it means the user was
-  using a straw granted by someone else but trying to re-grant at a
-  higher level than they themselves hold. Suggest a lower permission.
-- If the user is attempting to assign a straw they have no access to
-  (e.g. an admin-only demo), the call will fail. Tell them to request
-  access first via the regular access-request flow, then re-run the
-  skill.
+### Step 9: Report
+
+Surface what was created and how to use it.
+
+**Workspace-only** (deploy-skipped):
+
+```
+Saved Soda Straw Agent (workspace): <soda_straw_agent_id>
+  - http://localhost:5799/agents/<soda_straw_agent_id>
+
+This is just an access definition. To deploy a runtime later, add a
+`managed_claude_agent` straw and re-run me.
+```
+
+**Full deploy**:
+
+```
+Deployed:
+  Soda Straw Agent (workspace):  <soda_straw_agent_id>
+    http://localhost:5799/agents/<soda_straw_agent_id>
+  Anthropic Managed Agent:       <remote_agent_id>
+  Environment:                   <environment_id>
+
+To run a session:
+
+  straws_call(
+    straw=<deploy_straw>,
+    tool="session_create",
+    arguments={
+      "agent": "<remote_agent_id>",
+      "environment_id": "<environment_id>",
+      "title": "first run"
+    }
+  )
+
+  straws_call(
+    straw=<deploy_straw>,
+    tool="session_send_event",
+    arguments={
+      "session_id": "<session-id>",
+      "events": [{"type": "user.message", "content": [{"type": "text", "text": "..."}]}]
+    }
+  )
+
+  straws_call(
+    straw=<deploy_straw>,
+    tool="session_events_list",
+    arguments={"session_id": "<session-id>"}
+  )
+```
+
+Offer to kick off the first session now ("Want me to invoke it once
+with `<sensible first message>` to confirm the wiring?"). The user can
+decline and run it later. Don't mention the personal API key — that
+stays personal.
+
+## Authorisation and rollback notes
+
+- The caller must own each straw being assigned to the workspace, or
+  hold an `IdentityStraw` grant at the right rank. If `agents_create`
+  returns `permission_denied`, the user is using a straw granted by
+  someone else but trying to re-grant at a higher level than they
+  themselves hold. Suggest a lower permission.
+- The caller must have `read_write` (or higher) on the
+  `managed_claude_agent` straw — `agent_create` is a write tool.
+- If `agent_create` fails after the workspace was created, the
+  workspace stays. That's fine; re-run me and reference the existing
+  Agent by name to skip the promote step (just say "deploy
+  <agent-name>").
+- If the auto-wire fails partway (vault created but credential failed,
+  etc.), the adapter rolls back the Anthropic-side resources and
+  revokes the minted key. Surface the error from `agent_create`
+  verbatim and stop.
 
 ## When NOT to use this skill
 
-- The user wants the session to actually *run* (schedule, message
-  trigger, background) — use `deploy-session` instead. That skill
-  creates the Agent (workspace) AND the deployed runtime.
-- The user just wants to *see* what happened in this session — no Agent
-  needed. Show the inventory and stop.
-- No Soda Straw tool calls happened — no useful promotion possible.
-- The user is inside an existing Soda Straw Agent's run (not Claude
-  Code). Agents don't spawn other Agents this way.
+- The user is editing an already-deployed agent (changing system prompt
+  or model) — that's an `agent_update` call against the
+  `managed_claude_agent` straw, not a fresh promote.
+- The user just wants to *see* what happened in this session — show
+  the inventory and stop.
+- No Soda Straw tool calls happened *and* no existing Agent was
+  referenced — there's nothing to promote.
+- The user is inside an already-deployed agent's run (not Claude Code).
+  Agents don't spawn other Agents this way.
+
+## Local dev gotcha (ngrok / tunnels)
+
+The deployed agent's vault credential pins the `mcp_server_url` at
+create time and **cannot be edited**. If your ngrok URL rotates, the
+existing deployed agent will fail MCP calls. To recover: delete (or
+archive) the deployed agent, update `gateway_url` on the
+`managed_claude_agent` straw, and re-run me.
 
 ## Naming conventions
 
