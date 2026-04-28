@@ -193,17 +193,12 @@ for fn in setup_claude_code setup_codex setup_cursor setup_windsurf setup_gemini
 done
 
 if [[ "$installed_any" -eq 0 ]]; then
-  warn "No supported AI tools detected."
-  warn "Supported: Claude Code, Codex CLI, Cursor, Windsurf, Gemini CLI, OpenCode."
+  warn "No supported AI tools detected. Supported: Claude Code, Codex CLI, Cursor, Windsurf, Gemini CLI, OpenCode."
   exit 1
 fi
 
 if [[ -n "${SODA_STRAW_API_KEY:-}" ]]; then
   log "Done. Restart your tools to pick up the new MCP server and skills."
 else
-  log "Done. Restart your tools to pick up the new MCP server and skills."
-  log "On first use of a Soda Straw tool, your host will open a browser"
-  log "to authorize. If your host doesn't support MCP OAuth, mint an API"
-  log "key at $SODA_STRAW_URL/settings?tab=api-keys and rerun with"
-  log "SODA_STRAW_API_KEY=<key> bash install.sh"
+  log "Done. Restart your tools to pick up the new MCP server and skills. On first use of a Soda Straw tool, your host will open a browser to authorize. If your host doesn't support MCP OAuth, mint an API key at $SODA_STRAW_URL/settings?tab=api-keys and rerun with SODA_STRAW_API_KEY=<key> bash install.sh"
 fi
