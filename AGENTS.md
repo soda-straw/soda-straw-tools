@@ -37,7 +37,7 @@ The user is prompted to authorize on the first connection - typically the next t
 Clone this repo to a stable location if it isn't already there:
 
 ```
-git clone https://github.com/sodadata/soda-straw-tools.git ~/.soda-straw-tools
+git clone https://github.com/soda-straw/soda-straw-tools.git ~/.soda-straw-tools
 ```
 
 Symlink every subdirectory of `~/.soda-straw-tools/soda-straw/skills/` into the host tool's skills directory:

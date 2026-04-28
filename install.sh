@@ -10,7 +10,7 @@
 # keystore.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/sodadata/soda-straw-tools/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/soda-straw/soda-straw-tools/main/install.sh | bash
 #   SODA_STRAW_URL=https://my-instance.sodastraw.ai bash install.sh
 #
 # For hosts that don't support MCP OAuth on HTTP transports, set
@@ -20,12 +20,12 @@
 #   SODA_STRAW_API_KEY=ssk_... bash install.sh
 #
 # For Claude Code, prefer:
-#   /plugin marketplace add sodadata/soda-straw-tools
+#   /plugin marketplace add soda-straw/soda-straw-tools
 #   /plugin install soda-straw@soda-straw-tools
 
 set -euo pipefail
 
-REPO_URL="https://github.com/sodadata/soda-straw-tools.git"
+REPO_URL="https://github.com/soda-straw/soda-straw-tools.git"
 INSTALL_DIR="${SODA_STRAW_INSTALL_DIR:-$HOME/.soda-straw-tools}"
 
 log() { printf "\033[36m==>\033[0m %s\n" "$*"; }
@@ -106,7 +106,7 @@ write_mcp_http() {
 setup_claude_code() {
   [[ -d "$HOME/.claude" ]] || return 1
   log "Claude Code detected"
-  warn "  for Claude Code, prefer: /plugin marketplace add sodadata/soda-straw-tools && /plugin install soda-straw@soda-straw-tools"
+  warn "  for Claude Code, prefer: /plugin marketplace add soda-straw/soda-straw-tools && /plugin install soda-straw@soda-straw-tools"
   link_skills "$HOME/.claude/skills"
   if have claude; then
     if [[ -n "${SODA_STRAW_API_KEY:-}" ]]; then
