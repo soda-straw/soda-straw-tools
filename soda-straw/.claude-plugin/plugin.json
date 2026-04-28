@@ -2,7 +2,7 @@
   "name": "soda-straw",
   "description": "Connect to the Soda Straw MCP and promote sessions into persistent agents",
   "version": "2.0.0",
-  "homepage": "https://github.com/sodadata/soda-straw-tools",
+  "homepage": "https://github.com/soda-straw/soda-straw-tools",
   "userConfig": {
     "api_endpoint": {
       "type": "string",

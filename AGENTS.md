@@ -2,88 +2,27 @@
 
 You (the agent) have been asked to install the Soda Straw tools into the environment you're running in. Follow these steps exactly. Do **not** invoke `install.sh` or `/plugin ...` - those are entrypoints for humans. You have file-write access; use it directly.
 
-Soda Straw uses OAuth 2.1 device authorization (RFC 8628), so the user authenticates in their browser - no token paste.
+Soda Straw's `/mcp` endpoint is OAuth 2.1 protected (RFC 8414 + RFC 9728 metadata, RFC 7591 dynamic client registration, RFC 8628 device grant). The host tool's MCP HTTP transport handles the entire authorization flow on its own - you don't pre-mint a token, and you don't bake a bearer header into the config. The host stores tokens in its own credential store and refreshes them as needed.
 
 ## Step 1 - ask the user for their Soda Straw URL
 
 Ask once: the base URL of their Soda Straw instance, e.g. `https://app.sodastraw.ai`. Strip any trailing slash.
 
-## Step 2 - register this host as an OAuth client (one-time)
+## Step 2 - register the MCP server in the host's config
 
-```
-POST <URL>/api/oauth/register
-Content-Type: application/json
-
-{
-  "client_name": "Soda Straw installer on <hostname>",
-  "redirect_uris": ["http://localhost:0/callback"],
-  "grant_types": [
-    "urn:ietf:params:oauth:grant-type:device_code",
-    "refresh_token"
-  ],
-  "response_types": ["code"],
-  "token_endpoint_auth_method": "none"
-}
-```
-
-Cache the returned `client_id` somewhere persistent (e.g. `~/.soda-straw-tools/client.json`). You only need to do this once per host.
-
-## Step 3 - begin the device flow
-
-```
-POST <URL>/api/oauth/device_authorization
-Content-Type: application/x-www-form-urlencoded
-
-client_id=<stored_client_id>
-scope=mcp
-device_metadata={"hostname":"<hostname>"}
-```
-
-Response contains `device_code`, `user_code`, `verification_uri_complete`, `interval`, `expires_in`.
-
-Print to the user, clearly:
-
-```
-Authorize this installation:
-  Open:   <verification_uri_complete>
-  Code:   <user_code>
-```
-
-## Step 4 - poll for approval
-
-Every `interval` seconds:
-
-```
-POST <URL>/api/oauth/token
-Content-Type: application/x-www-form-urlencoded
-
-grant_type=urn:ietf:params:oauth:grant-type:device_code
-device_code=<device_code>
-client_id=<stored_client_id>
-```
-
-The server returns one of:
-
-- `{ access_token, refresh_token, ... }` - success. Proceed to step 5.
-- `{"detail":{"error":"authorization_pending"}}` - continue polling.
-- `{"detail":{"error":"slow_down"}}` - continue polling (you polled too fast; the server has bumped your last-polled timestamp).
-- `{"detail":{"error":"access_denied"}}` - user denied. Tell them and stop.
-- `{"detail":{"error":"expired_token"}}` - the device code expired. Tell them and stop.
-
-Respect the `interval` and don't poll faster than that.
-
-## Step 5 - register the MCP server
-
-Write the MCP server config into the host tool's config file. Use the `access_token` as the bearer:
+Write the MCP server entry. **Do not include any `Authorization` header.** The host will discover the OAuth metadata at `<URL>/.well-known/oauth-protected-resource`, run dynamic client registration against `<URL>/api/oauth/register`, drive the user through the browser auth flow on first connection, and rotate refresh tokens itself.
 
 - **Name**: `soda-straw`
 - **Transport**: `http`
 - **URL**: `<URL>/mcp`
-- **Headers**: `Authorization: Bearer <access_token>`
 
-For Claude Code specifically, prefer the CLI: `claude mcp add soda-straw --transport http --scope user --header "Authorization: Bearer <access_token>" <URL>/mcp`.
+For Claude Code specifically, prefer the CLI:
 
-Other config locations:
+```
+claude mcp add soda-straw --transport http --scope user <URL>/mcp
+```
+
+Other config locations (write only `type: "http"` and `url`; **no `headers`**):
 
 - Codex CLI: `~/.codex/mcp_servers.json` under `mcpServers.soda-straw`
 - Cursor: `~/.cursor/mcp.json` under `mcpServers.soda-straw`
@@ -91,12 +30,14 @@ Other config locations:
 - Gemini CLI: `~/.gemini/settings.json` under `mcpServers.soda-straw`
 - OpenCode: `~/.config/opencode/config.json` under `mcp.soda-straw`
 
-## Step 6 - install the skills
+The user is prompted to authorize on the first connection - typically the next tool restart.
+
+## Step 3 - install the skills
 
 Clone this repo to a stable location if it isn't already there:
 
 ```
-git clone https://github.com/sodadata/soda-straw-tools.git ~/.soda-straw-tools
+git clone https://github.com/soda-straw/soda-straw-tools.git ~/.soda-straw-tools
 ```
 
 Symlink every subdirectory of `~/.soda-straw-tools/soda-straw/skills/` into the host tool's skills directory:
@@ -111,7 +52,7 @@ Symlink every subdirectory of `~/.soda-straw-tools/soda-straw/skills/` into the 
 
 Skills follow the [Agent Skills spec](https://agentskills.io/specification); no format conversion needed.
 
-## Step 7 - keep the skills up to date
+## Step 4 - keep the skills up to date
 
 The skills evolve. Configure the host tool to refresh `~/.soda-straw-tools` once per session so updates land without the user thinking about it. The command to wire up:
 
@@ -142,20 +83,18 @@ Translate to whatever startup-hook mechanism the host tool offers:
 
 Merge into existing hook config rather than overwriting it.
 
-## Step 8 - confirm and hand off
+## Step 5 - confirm and hand off
 
 Tell the user, in one short message:
 
-- That the OAuth grant succeeded and the MCP server is configured.
+- That the MCP server is registered (no token was minted; the host will run the OAuth flow on first connection).
 - Where the MCP config was written (file path).
 - Where the skills were linked (directory).
-- That they should restart the tool.
-
-Do not print the access/refresh tokens back. Stash the refresh token if you want automatic re-rotation (at `~/.soda-straw-tools/refresh_token`, mode 600); otherwise discard it after writing the MCP config.
+- That they should restart the tool, and on first use of a Soda Straw tool the host will open a browser to authorize.
 
 ## Failure modes
 
-- **DCR rejected** (400 `invalid_redirect_uri`) - the Soda Straw instance URL may be wrong; double-check with the user.
+- **Host tool doesn't speak MCP OAuth.** Some hosts only accept a static `Authorization` header on HTTP MCPs and won't drive the auth flow themselves. In that case, do **not** mint a short-lived OAuth access token (it expires in ~1 hour with no refresh path on the host's end). Instead, ask the user to create a long-lived API key at `<URL>/settings?tab=api-keys`, paste it back to you, and write it as `Authorization: Bearer <api_key>` into the MCP config. API keys revoke individually and don't decay.
 - **No write access** to the config file - print the file path and JSON block; don't try to work around permissions.
 - **Unknown host tool** - fall back to writing skills under `~/.agents/skills/` and ask the user where their tool keeps MCP configs.
-- **Token rejected by /mcp** (401 Unauthorized) - the access token may have expired; rerun the device flow.
+- **OAuth flow fails on first connection** (e.g. host can't open a browser, or the tunnel is unreachable) - the user can rerun the host's MCP authorization command (Claude Code: `/mcp`), or fall back to the API-key path above.
