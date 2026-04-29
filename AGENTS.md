@@ -83,14 +83,19 @@ Translate to whatever startup-hook mechanism the host tool offers:
 
 Merge into existing hook config rather than overwriting it.
 
-## Step 5 - confirm and hand off
+## Step 5 - confirm and guide the user through authorization
+
+The MCP server is registered but unauthenticated. You can't trigger OAuth from your current session - the host won't surface the new MCP server until it restarts, and even if it did, OAuth must be driven by the host's MCP transport (not by you) so the host owns the token and can refresh it. Pre-minting a token here would break refresh, exactly as it did before.
 
 Tell the user, in one short message:
 
-- That the MCP server is registered (no token was minted; the host will run the OAuth flow on first connection).
+- That the MCP server is registered (no token was minted; the host will run the OAuth flow itself).
 - Where the MCP config was written (file path).
 - Where the skills were linked (directory).
-- That they should restart the tool, and on first use of a Soda Straw tool the host will open a browser to authorize.
+- That they need to **restart the host tool**, then **trigger the OAuth flow** with one of:
+  - **Claude Code**: run `/mcp` and pick `soda-straw` -> Authenticate. (Or just ask the next session to call any Soda Straw tool, e.g. `mcp__soda-straw__whoami`, and the transport will pop the browser.)
+  - **Codex CLI / Cursor / Windsurf / Gemini CLI / OpenCode**: in a fresh session, ask the agent to call `mcp__soda-straw__whoami` (or any Soda Straw tool). The host's MCP HTTP transport discovers the OAuth metadata, opens the browser, and stores the resulting token in its own keystore. Refresh is automatic from there.
+- That a successful `whoami` reply (their email + workspace) means auth is wired up; if the browser doesn't open, fall back to the API-key path under "Failure modes".
 
 ## Failure modes
 
