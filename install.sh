@@ -200,5 +200,25 @@ fi
 if [[ -n "${SODA_STRAW_API_KEY:-}" ]]; then
   log "Done. Restart your tools to pick up the new MCP server and skills."
 else
-  log "Done. Restart your tools to pick up the new MCP server and skills. On first use of a Soda Straw tool, your host will open a browser to authorize. If your host doesn't support MCP OAuth, mint an API key at $SODA_STRAW_URL/settings?tab=api-keys and rerun with SODA_STRAW_API_KEY=<key> bash install.sh"
+  cat <<EOF
+
+$(printf "\033[36m==>\033[0m") Done. Next steps to finish authentication:
+
+  1. Restart your AI tool so it picks up the new MCP server and skills.
+  2. Trigger the OAuth flow once - the host (not this script) drives it,
+     so the token lives in your host's keystore and refreshes itself:
+
+       - Claude Code: run /mcp, pick soda-straw, choose Authenticate.
+       - Cursor / Windsurf / Codex / Gemini / OpenCode: in a fresh
+         session, ask the agent to call the soda-straw 'whoami' tool
+         (or any soda-straw tool). Your host will open a browser to
+         authorize.
+
+  3. A successful 'whoami' (your email + workspace) confirms auth.
+
+If your host doesn't support MCP OAuth, mint an API key at
+$SODA_STRAW_URL/settings?tab=api-keys and rerun with:
+  SODA_STRAW_API_KEY=<key> bash install.sh
+
+EOF
 fi

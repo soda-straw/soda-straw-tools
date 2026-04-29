@@ -21,7 +21,7 @@ Skills follow the [Agent Skills spec](https://agentskills.io/specification) and 
 /plugin install soda-straw@soda-straw-tools
 ```
 
-You'll be prompted for your Soda Straw endpoint once. The first time the MCP server is called, Claude Code discovers the OAuth authorization server from `/.well-known/oauth-protected-resource`, opens your browser, and you approve the connection. The resulting token lives in your OS keychain and refreshes automatically.
+You'll be prompted for your Soda Straw endpoint once. To finish setup, restart Claude Code, then run `/mcp`, pick `soda-straw`, and choose **Authenticate** - Claude Code discovers the OAuth authorization server from `/.well-known/oauth-protected-resource`, opens your browser, and you approve the connection. (Or just ask Claude Code to call any Soda Straw tool, e.g. `whoami`, and the same flow runs on demand.) The resulting token lives in your OS keychain and refreshes automatically.
 
 ## Install - via an agent
 
@@ -42,7 +42,7 @@ The script:
 1. Asks for your Soda Straw endpoint.
 2. Detects installed tools (Cursor, Windsurf, Gemini CLI, OpenCode, Codex CLI, Claude Code) and writes URL-only MCP configs + symlinks skills.
 
-On first connect, your host's MCP transport discovers the OAuth metadata, runs DCR, and opens your browser to authorize. Tokens live in the host's keystore and refresh automatically — the installer itself never sees a token.
+After the script finishes, restart your tool, then trigger auth once: in Claude Code run `/mcp` -> `soda-straw` -> Authenticate; in other hosts, ask the agent to call the Soda Straw `whoami` tool in a fresh session. The host's MCP transport discovers the OAuth metadata, runs DCR, and opens your browser to authorize. Tokens live in the host's keystore and refresh automatically — the installer itself never sees a token.
 
 For hosts that don't speak MCP OAuth, mint a long-lived API key in the Soda Straw UI (Settings → API keys) and set `SODA_STRAW_API_KEY=<key>` before running the script — it'll write a static `Authorization` header instead.
 
